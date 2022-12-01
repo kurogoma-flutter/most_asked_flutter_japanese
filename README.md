@@ -59,6 +59,85 @@ extension methodsとは何ですか？
 null safetyとは何ですか？
 
 ### 1.ElementとWidgetの関係性について説明できますか？
+FlutterはElementとRenderの2つのツリーを使います。
+Renderツリーには画面上にピクセルを描画するために使用されるUIコンポーネントの座標が格納されます。
+ElementツリーにはWidgetsとその状態（Statefulの場合）、そして時間の経過とともに変化する親子関係が格納されます。
+
+*BuildContext*
+
+```dart
+///...略...
+/// [BuildContext] objects are actually [Element] objects. The [BuildContext]
+/// interface is used to discourage direct manipulation of [Element] objects.
+abstract class BuildContext {
+  /// The current configuration of the [Element] that is this [BuildContext].
+  Widget get widget;
+  //...略...
+}
+```
+
+*Element*
+
+```dart
+abstract class Element extends DiagnosticableTree implements BuildContext {
+  /// Creates an element that uses the given widget as its configuration.
+  ///
+  /// Typically called by an override of [Widget.createElement].
+  Element(Widget widget)
+    : assert(widget != null),
+      _widget = widget;
+
+  Element? _parent;
+  //...略... 
+}
+```
+つまり、BuildContextの正体はElementである。
+（Element全体ではなく、BuildContextのインターフェース部分なので、ツリーそのものをいじることはできない）
+
+各Elementは、`_parent`フィールドで自分の親が誰なのか知っている。
+
+＜＜TODO エレメントツリーの画像＞＞
+
+そして、Elementツリーを検索していくと、ルートElement（親はnull）に辿り着くことができます。
+上の画像からわかるように、builderContextはContainerのElementの親Element[ノードであり](https://wa3.i-3-i.info/word1300.html)、デバッガが停止した場所（21行目）である。
+では、これらのオブジェクトはどのような順序で作成されるのだろうか？
+
+まず、Widgetを作成します。
+そして、そのWidgetをアプリのUIに組み込むと決めたら、そのWidgetのElementを作成します。
+その要素がコンストラクタの中に作成されます。
+そのコンストラクタ内で、State(Statefulの場合)が生成され、最後にビルドメソッドが実行されます。
+
+```dart
+/// An [Element] that uses a [StatefulWidget] as its configuration.
+class StatefulElement extends ComponentElement {
+  /// Creates an element that uses the given widget as its configuration.
+  StatefulElement(StatefulWidget widget)
+      : _state = widget.createState(),
+        super(widget) {
+  //...略...
+}
+```
+
+要約すると、ElementはWidgetのインスタンスと、StatefulWidgetの場合その状態のインスタンスを保持します。そのため、Widgetが不変となるためUIは簡単に変更ができます。
+
+興味深いことに、StatefulWidgetの同じインスタンスをUIの複数の場所に挿入すると、Widgetのインスタンスは1つになりますが、Stateのインスタンスは複数（ツリーの異なるElementに配置）存在することになります。
+例外として、GlobalKeyがStateful Widgetで使用される場合です。これについては、質問3.で詳しく説明しています。
+
+*Stateクラスのコメント抜粋*
+```dart
+///
+/// [State] objects are created by the framework by calling the
+/// [StatefulWidget.createState] method when inflating a [StatefulWidget] to
+/// insert it into the tree. Because a given [StatefulWidget] instance can be
+/// inflated multiple times (e.g., the widget is incorporated into the tree in
+/// multiple places at once), there might be more than one [State] object
+/// associated with a given [StatefulWidget] instance. Similarly, if a
+/// [StatefulWidget] is removed from the tree and later inserted in to the tree
+/// again, the framework will call [StatefulWidget.createState] again to create
+/// a fresh [State] object, simplifying the lifecycle of [State] objects.
+///
+```
+
 ### 2.Stateオブジェクトとは何か、dispose()メソッドが実行された後はどうなるのか？
 ### 3.Widget Keyとは何ですか、何に使うのですか？
 ### 4.Dartはシングルスレッド言語ですか？非同期タスクはどのように実行されるのですか？
