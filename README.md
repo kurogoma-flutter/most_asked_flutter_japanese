@@ -96,7 +96,7 @@ abstract class Element extends DiagnosticableTree implements BuildContext {
 
 各Elementは、`_parent`フィールドで自分の親が誰なのか知っている。
 
-＜＜TODO エレメントツリーの画像＞＞
+![image](https://user-images.githubusercontent.com/67848399/205405267-90d66f54-a86d-45d5-b63e-10466be79d11.png)
 
 そして、Elementツリーを検索していくと、ルートElement（親はnull）に辿り着くことができます。
 上の画像からわかるように、builderContextはContainerのElementの親Element[ノードであり](https://wa3.i-3-i.info/word1300.html)、デバッガが停止した場所（21行目）である。
@@ -121,7 +121,6 @@ class StatefulElement extends ComponentElement {
 要約すると、ElementはWidgetのインスタンスと、StatefulWidgetの場合その状態のインスタンスを保持します。そのため、Widgetが不変となるためUIは簡単に変更ができます。
 
 興味深いことに、StatefulWidgetの同じインスタンスをUIの複数の場所に挿入すると、Widgetのインスタンスは1つになりますが、Stateのインスタンスは複数（ツリーの異なるElementに配置）存在することになります。
-例外として、GlobalKeyがStateful Widgetで使用される場合です。これについては、質問3.で詳しく説明しています。
 
 *Stateクラスのコメント抜粋*
 ```dart
@@ -137,8 +136,67 @@ class StatefulElement extends ComponentElement {
 /// a fresh [State] object, simplifying the lifecycle of [State] objects.
 ///
 ```
+例外として、GlobalKeyがStateful Widgetで使用される場合です。これについては、質問3.で詳しく説明しています。
 
 ### 2.Stateオブジェクトとは何か、dispose()メソッドが実行された後はどうなるのか？
+ウィジェットは不変であると聞いたことがありますが、ユーザーのアクションによってUIが変化するのはなぜでしょうか？もしWidgetsが不変なら、誰がUIの動的な動作に責任を持つのでしょうか？
+
+**StatefulWidgetのStateオブジェクトです！**
+
+StatefulWidgetがElementツリーに挿入されると、そのcreateState()メソッドは対応するElementのコンストラクタから呼び出されます。
+
+Stateがツリーに挿入されると、initState()が実行されますが、これはStateインスタンスごとに一度だけ実行されます。
+
+initState()の後、build()が呼び出されます。setState()を呼び出すことで、複数回呼び出すことができる。
+
+つまり、StatefulWidgetの親が再描画された場合、Widgetがゼロから作成されても、StateオブジェクトのinitState()は呼ばれません（一度だけ呼ばれるから！）。なぜ、このようなことが起こるのでしょうか？
+
+FlutterはStatefulWidgetの状態を保持しようとし、要素ツリー内の古い場所にある場合のみWidgetを再作成します。
+
+a.) runtime Type または
+b.) Key
+に変化があった場合、ウィジェットが再作成されるのです。
+
+Widgetが同じタイプで、同じキー（またはキーなし）であれば、ElementはWidgetを更新（再作成）するだけで、古いStateオブジェクトは保存されます。
+
+![image](https://user-images.githubusercontent.com/67848399/205405239-9f65526d-c55e-4e71-8576-a27999869ad4.png)
+
+![image](https://user-images.githubusercontent.com/67848399/205405249-4334b8b7-7b24-4b25-822f-3be471fada12.png)
+
+Streamをの検知をするのを止めたり、または別のものを登録したり、ウィジェットを更新（再作成）するにはどうすれば良いでしょうか？
+以下がそのメソッドです。
+
+```Dart
+@override
+void didUpdateWidget(covariant StatefulText oldWidget) {
+```
+
+これは、Widgetが新しいものと入れ替わるたびに呼び出される。このメソッドでは、新しくアタッチされたWidgetに由来する、必要なものすべてを更新することができます。このメソッドが実行された後、build()メソッドが呼び出されます。
+
+しかし、もしStateを再利用せず、親Widgetが再構築されるたびに新しい要素（新しいWidgetと新しいState）を作成したい場合は、そのWidgetにUniqueKeyを追加します（しかし、これは高価であることに留意してください！）。
+
+では、エレメントツリーから削除された後(エレメント全体が別のものに置き換えられるとき)、Stateはどうなるのでしょうか？
+
+![image](https://user-images.githubusercontent.com/67848399/205405879-f4f71b67-1b5d-4215-9817-d4b1f0b0b802.png)
+
+この TimerWidget は、ユーザがクリックすると、UniqueKey() を使って新しいものに置き換えられます。
+
+https://miro.medium.com/max/1400/1*2iveunD_P7qGDu4rrzOwEg.webp
+
+で、2回クリックした後のコンソールログはこんな感じです。
+
+![image](https://user-images.githubusercontent.com/67848399/205406626-ef37095f-06d1-410b-8006-0d0063e4a549.png)
+
+これは、State要素がツリーから削除された後も生きている（メモリのどこかに生きている）ことを意味するので、dispose()ではStreamの購読を解除したり、Timerをキャンセルしたりすることに注意してください。
+
+... あるいは、dispose()の前に呼ばれるdeactivate()でさえ、そうするかもしれません。場合によっては、ツリーから削除されたエレメントは、他の場所に再挿入されることがあります（例えば、グローバルキーが使用されている場合）。Elementが再挿入されると、activate()メソッドが呼ばれ（deactivate()でオフにしたものをすべて起動する時間を与える）、その後、build()が呼ばれます。
+
+この例では、dispose()が終了すると、Stateはunmounted(mounted == false)され、ツリーから永久に削除されます!
+
+![image](https://user-images.githubusercontent.com/67848399/205406949-e9a97192-5e56-437f-a576-063b23b2bf3d.png)
+
+...これは実際には、このStateオブジェクトがそのElementから切り離されたことを意味する。
+
 ### 3.Widget Keyとは何ですか、何に使うのですか？
 ### 4.Dartはシングルスレッド言語ですか？非同期タスクはどのように実行されるのですか？
 ### 5.constとfinalの違いは何ですか？
